@@ -8,20 +8,31 @@ body{margin:0;height:100vh;display:flex;background:#2b2b2b;color:#eee;font-famil
 #tools,#layers{width:230px;background:#3a3a3a;padding:10px;overflow:auto;}
 #canvasWrap{flex:1;position:relative;background:#1e1e1e;overflow:hidden;}
 canvas{width:100%;height:100%;cursor:crosshair;}
-button,select,input,label{width:100%;margin-bottom:6px;padding:6px;background:#555;color:#eee;border:none;font-size:14px;}
-li{padding:4px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;font-size:14px;}
+button,select,input,label{width:100%;margin-bottom:6px;padding:6px;background:#555;color:#eee;border:none;font-size:14px;border-radius:4px;}
+li{padding:6px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;font-size:14px;}
 li.selected{background:#5a5aff;}
 .tooltip{position:absolute;background:rgba(0,0,0,0.7);color:#fff;padding:4px 6px;font-size:12px;border-radius:4px;pointer-events:none;white-space:nowrap;}
-.color-btn{width:20px;height:20px;border-radius:50%;margin-left:4px;cursor:pointer;border:1px solid #ccc;}
-.delete-btn{cursor:pointer;margin-left:6px;color:#ff5555;}
+.color-btn{width:25px;height:25px;border-radius:50%;margin-left:4px;cursor:pointer;border:1px solid #ccc;}
+.delete-btn{cursor:pointer;margin-left:6px;color:#ff5555;font-size:16px;}
 .hidden{display:none !important;}
 #toggleTools,#toggleLayers,#toggleView{display:none;position:absolute;top:10px;z-index:20;padding:10px;background:#777;border:none;border-radius:6px;color:#fff;font-size:20px;}
 
 /* Mobile responsive */
 @media(max-width:768px){
   body{flex-direction:column;}
-  #tools,#layers{width:100%;position:absolute;top:0;left:0;max-height:50vh;display:none;z-index:10;}
-  #tools.mobile.active,#layers.mobile.active{display:block;}
+  #tools,#layers {
+    width:100%;
+    position:absolute;
+    top:0;
+    left:0;
+    max-height:50vh;
+    display:none;
+    z-index:10;
+    overflow-y:auto;
+  }
+  #tools.mobile.active,#layers.mobile.active{
+    display:block;
+  }
   canvas{cursor:default;}
   button,select,input,label{font-size:18px;padding:10px;}
   li{font-size:16px;}
@@ -85,7 +96,7 @@ let img=new Image();
 let scale=1,offX=0,offY=0,opacity=1;
 let segments=[],selected=null,drawing=null,baseSegment=null;
 const colors=["red","yellow"];
-let firstPoint=null; // dla tap+tap
+let firstPoint=null;
 
 /* ---------- DEVICE DETECTION ---------- */
 const isMobileDevice = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -102,13 +113,25 @@ if(isMobileDevice){
 }
 
 /* ---------- RESIZE ---------- */
-function resize(){canvas.width=canvas.parentElement.clientWidth;canvas.height=canvas.parentElement.clientHeight;draw();}
+function resize(){canvas.width=canvas.parentElement.clientWidth;canvas.height=canvas.parentElement.clientHeight; adjustPanels(); draw();}
 window.onresize=resize; resize();
+
+/* ---------- ADJUST PANELS ---------- */
+function adjustPanels(){
+  const vh = window.innerHeight;
+  const vw = window.innerWidth;
+  if(vw<=768){
+    tools.style.maxHeight = (vh*0.45)+"px";
+    layersDiv.style.maxHeight = (vh*0.45)+"px";
+  } else {
+    tools.style.maxHeight = "100%";
+    layersDiv.style.maxHeight = "100%";
+  }
+}
 
 /* ---------- IMAGE ---------- */
 fileInput.onchange=e=>{const r=new FileReader(); r.onload=ev=>img.src=ev.target.result; r.readAsDataURL(e.target.files[0]);};
 img.onload = ()=>{
-  // dopasowanie zdjęcia do ekranu
   const canvasRatio = canvas.width / canvas.height;
   const imgRatio = img.width / img.height;
   if(imgRatio > canvasRatio){ scale = canvas.width / img.width; }
@@ -141,9 +164,8 @@ function draw(){
     ctx.beginPath(); ctx.moveTo(drawing.a.x,drawing.a.y);
     ctx.lineTo(drawing.b.x,drawing.b.y);
     ctx.stroke();
-    // kółko punktu startowego
     ctx.beginPath();
-    ctx.arc(drawing.a.x,drawing.a.y,5/scale,0,2*Math.PI);
+    ctx.arc(drawing.a.x,drawing.a.y,7/scale,0,2*Math.PI);
     ctx.fillStyle="rgba(255,255,255,0.7)"; ctx.fill();
     ctx.setLineDash([]);
   }
@@ -168,7 +190,6 @@ function startInteraction(e){
     if(!firstPoint){ firstPoint=p; drawing={a:{...p},b:{...p}}; draw(); return;}
     else { const a=firstPoint, b=p; addSegment(a,b); firstPoint=null; drawing=null; return;}
   }
-  // desktop
   if(!drawing){ drawing={a:{...p},b:{...p}}; }
   if(!isMobileDevice && spacePressed){ isPanning=true; panStart={x:e.clientX,y:e.clientY}; }
 }
@@ -190,7 +211,6 @@ function moveInteraction(e){
     draw(); return;
   }
   if(drawing){ 
-    // snap do 0°/90° przy pierwszym rysowaniu
     const dx = p.x-drawing.a.x;
     const dy = p.y-drawing.a.y;
     if(Math.abs(dx)>Math.abs(dy) && Math.abs(dy)<10) p.y=drawing.a.y;
@@ -263,8 +283,8 @@ function showTooltip(p){
     const d=distanceToSegment(p,s);
     if(d<5/scale){
       tooltip.style.display="block";
-      tooltip.style.left=(isMobileDevice?p.x*scale+offX:p.x*scale+offX)+10+"px";
-      tooltip.style.top=(isMobileDevice?p.y*scale+offY:p.y*scale+offY)+10+"px";
+      tooltip.style.left=(p.x*scale+offX)+10+"px";
+      tooltip.style.top=(p.y*scale+offY)+10+"px";
       if(baseSegment){
         const ratio=s.realLength/baseSegment.baseLength;
         tooltip.textContent = ratio.toFixed(2)==="1.00"?"Pełna linia bazowa":ratio.toFixed(2)==="0.50"?"Połowa linii bazowej":"Linia "+ratio.toFixed(2)+"× bazowej";
