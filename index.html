@@ -34,7 +34,7 @@ li.selected{background:#5a5aff;}
 </head>
 <body>
 
-<!-- Przycisk do paneli na mobile -->
+<!-- Przyciski mobilne -->
 <button id="toggleTools">☰ Narzędzia</button>
 <button id="toggleLayers">🗂 Warstwy</button>
 <button id="toggleView">👁️</button>
@@ -85,6 +85,7 @@ let img=new Image();
 let scale=1,offX=0,offY=0,opacity=1;
 let segments=[],selected=null,drawing=null,baseSegment=null;
 const colors=["red","yellow"];
+let firstPoint=null; // dla tap+tap
 
 /* ---------- DEVICE DETECTION ---------- */
 const isMobileDevice = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -107,7 +108,7 @@ window.onresize=resize; resize();
 /* ---------- IMAGE ---------- */
 fileInput.onchange=e=>{const r=new FileReader(); r.onload=ev=>img.src=ev.target.result; r.readAsDataURL(e.target.files[0]);};
 img.onload = ()=>{
-  // Dopasowanie zdjęcia do ekranu użytkownika
+  // dopasowanie zdjęcia do ekranu
   const canvasRatio = canvas.width / canvas.height;
   const imgRatio = img.width / img.height;
   if(imgRatio > canvasRatio){ scale = canvas.width / img.width; }
@@ -140,6 +141,10 @@ function draw(){
     ctx.beginPath(); ctx.moveTo(drawing.a.x,drawing.a.y);
     ctx.lineTo(drawing.b.x,drawing.b.y);
     ctx.stroke();
+    // kółko punktu startowego
+    ctx.beginPath();
+    ctx.arc(drawing.a.x,drawing.a.y,5/scale,0,2*Math.PI);
+    ctx.fillStyle="rgba(255,255,255,0.7)"; ctx.fill();
     ctx.setLineDash([]);
   }
 }
@@ -159,14 +164,12 @@ function startInteraction(e){
   e.preventDefault();
   if(isMobileDevice && e.touches && e.touches.length===2){ lastDist = Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY); return;}
   const p = getPointerPos(e);
-  if(!drawing){ drawing = {a:{...p},b:{...p}}; }
-  else {
-    const len = Math.hypot(p.x-drawing.a.x, p.y-drawing.a.y);
-    const seg = {a:{...drawing.a}, b:{...p}, baseLength:len, realLength:len, color:colors[segments.length%2]};
-    segments.push(seg); selected=seg;
-    if(learnMode.checked && !baseSegment) baseSegment=seg;
-    drawing=null; updateLayers(); draw();
+  if(isMobileDevice){
+    if(!firstPoint){ firstPoint=p; drawing={a:{...p},b:{...p}}; draw(); return;}
+    else { const a=firstPoint, b=p; addSegment(a,b); firstPoint=null; drawing=null; return;}
   }
+  // desktop
+  if(!drawing){ drawing={a:{...p},b:{...p}}; }
   if(!isMobileDevice && spacePressed){ isPanning=true; panStart={x:e.clientX,y:e.clientY}; }
 }
 
@@ -186,34 +189,32 @@ function moveInteraction(e){
     offX+=dx; offY+=dy; panStart={x:clientX,y:clientY};
     draw(); return;
   }
-  if(drawing){drawing.b=p; draw();}
-  if(!learnMode.checked) {tooltip.style.display="none"; return;}
-  let found=false;
-  for(let s of segments){
-    const d=distanceToSegment(p,s);
-    if(d<5/scale){
-      tooltip.style.display="block";
-      tooltip.style.left=(e.touches?e.touches[0].clientX:e.clientX)+10+"px";
-      tooltip.style.top=(e.touches?e.touches[0].clientY:e.clientY)+10+"px";
-      if(baseSegment){
-        const ratio=s.realLength/baseSegment.baseLength;
-        tooltip.textContent = ratio.toFixed(2)==="1.00"?"Pełna linia bazowa":ratio.toFixed(2)==="0.50"?"Połowa linii bazowej":"Linia "+ratio.toFixed(2)+"× bazowej";
-      } else tooltip.textContent="Brak linii bazowej";
-      found=true; break;
-    }
+  if(drawing){ 
+    // snap do 0°/90° przy pierwszym rysowaniu
+    const dx = p.x-drawing.a.x;
+    const dy = p.y-drawing.a.y;
+    if(Math.abs(dx)>Math.abs(dy) && Math.abs(dy)<10) p.y=drawing.a.y;
+    if(Math.abs(dy)>Math.abs(dx) && Math.abs(dx)<10) p.x=drawing.a.x;
+    drawing.b=p; draw();
   }
-  if(!found) tooltip.style.display="none";
+  showTooltip(p);
 }
 
 function endInteraction(e){
   if(drawing && (!e.touches || e.touches.length===0)){
-    const len = Math.hypot(drawing.b.x-drawing.a.x, drawing.b.y-drawing.a.y);
-    const seg = {a:{...drawing.a}, b:{...drawing.b}, baseLength:len, realLength:len, color:colors[segments.length%2]};
-    segments.push(seg); selected=seg;
-    if(learnMode.checked && !baseSegment) baseSegment=seg;
-    drawing = null; updateLayers(); draw();
+    addSegment(drawing.a,drawing.b);
+    drawing=null; firstPoint=null;
   }
   isPanning=false; lastDist=null;
+}
+
+function addSegment(a,b){
+  const len = Math.hypot(b.x-a.x,b.y-a.y);
+  const seg = {a:{...a}, b:{...b}, baseLength:len, realLength:len, color:colors[segments.length%2]};
+  segments.push(seg); selected=seg;
+  if(learnMode.checked && !baseSegment) baseSegment=seg;
+  updateLayers(); draw();
+  if(learnMode.checked) showRatio(seg);
 }
 
 canvas.addEventListener("mousedown",startInteraction);
@@ -252,6 +253,26 @@ function showRatio(seg){if(!learnMode.checked) return;
   const mid={x:(seg.a.x+seg.b.x)/2*scale+offX, y:(seg.a.y+seg.b.y)/2*scale+offY};
   badge.style.left=mid.x+"px"; badge.style.top=mid.y+"px";
   canvas.parentElement.appendChild(badge); setTimeout(()=>badge.remove(),2000);
+}
+
+/* ---------- TOOLTIP ---------- */
+function showTooltip(p){
+  if(!learnMode.checked) {tooltip.style.display="none"; return;}
+  let found=false;
+  for(let s of segments){
+    const d=distanceToSegment(p,s);
+    if(d<5/scale){
+      tooltip.style.display="block";
+      tooltip.style.left=(isMobileDevice?p.x*scale+offX:p.x*scale+offX)+10+"px";
+      tooltip.style.top=(isMobileDevice?p.y*scale+offY:p.y*scale+offY)+10+"px";
+      if(baseSegment){
+        const ratio=s.realLength/baseSegment.baseLength;
+        tooltip.textContent = ratio.toFixed(2)==="1.00"?"Pełna linia bazowa":ratio.toFixed(2)==="0.50"?"Połowa linii bazowej":"Linia "+ratio.toFixed(2)+"× bazowej";
+      } else tooltip.textContent="Brak linii bazowej";
+      found=true; break;
+    }
+  }
+  if(!found) tooltip.style.display="none";
 }
 
 /* ---------- LAYERS ---------- */
