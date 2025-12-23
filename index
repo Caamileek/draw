@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<title>Proporcje – Mobile & Desktop</title>
+<style>
+body{margin:0;height:100vh;display:flex;background:#2b2b2b;color:#eee;font-family:Arial;}
+#tools,#layers{width:230px;background:#3a3a3a;padding:10px;}
+#canvasWrap{flex:1;position:relative;background:#1e1e1e;overflow:hidden;}
+canvas{width:100%;height:100%;cursor:crosshair;}
+button,select,input,label{width:100%;margin-bottom:6px;padding:6px;background:#555;color:#eee;border:none;font-size:14px;}
+li{padding:4px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;font-size:14px;}
+li.selected{background:#5a5aff;}
+.tooltip{position:absolute;background:rgba(0,0,0,0.7);color:#fff;padding:4px 6px;font-size:12px;border-radius:4px;pointer-events:none;white-space:nowrap;}
+.color-btn{width:20px;height:20px;border-radius:50%;margin-left:4px;cursor:pointer;border:1px solid #ccc;}
+.delete-btn{cursor:pointer;margin-left:6px;color:#ff5555;}
+/* Mobile responsive */
+@media(max-width:768px){
+  body{flex-direction:column;}
+  #tools,#layers{width:100%;position:absolute;top:0;left:0;display:none;z-index:10;}
+  #tools.mobile.active,#layers.mobile.active{display:block;}
+  canvas{cursor:default;}
+  button,select,input,label{font-size:18px;padding:10px;}
+  li{font-size:16px;}
+}
+</style>
+</head>
+<body>
+
+<div id="tools">
+<h3>Narzędzia</h3>
+<input type="file" id="fileInput" accept="image/*">
+<button id="zoomIn">➕ Zoom</button>
+<button id="zoomOut">➖ Zoom</button>
+
+<label>Długość kopiowania</label>
+<select id="lengthMode"><option value="1">Pełna</option><option value="0.5">Połowa</option></select>
+
+<label>Przezroczystość</label>
+<input type="range" id="opacity" min="0.2" max="1" step="0.05" value="1">
+
+<label><input type="checkbox" id="learnMode"> 🎓 Tryb nauki</label>
+
+<h4>Kopiuj</h4>
+<button data-dir="left">⬅️ Lewo</button>
+<button data-dir="right">➡️ Prawo</button>
+<button data-dir="up">⬆️ Góra</button>
+<button data-dir="down">⬇️ Dół</button>
+</div>
+
+<div id="canvasWrap">
+<canvas id="canvas"></canvas>
+<div id="tooltip" class="tooltip" style="display:none;"></div>
+</div>
+
+<div id="layers">
+<h3>Warstwy</h3>
+<ul id="layerList"></ul>
+</div>
+
+<script>
+const canvas=document.getElementById("canvas");
+const ctx=canvas.getContext("2d");
+const tooltip=document.getElementById("tooltip");
+const layerList=document.getElementById("layerList");
+const tools=document.getElementById("tools");
+const layersDiv=document.getElementById("layers");
+
+let img=new Image();
+let scale=1,offX=0,offY=0,opacity=1;
+let segments=[],selected=null,drawing=null,baseSegment=null;
+const colors=["red","yellow"];
+
+/* ---------- DEVICE DETECTION ---------- */
+const isMobileDevice = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+if(isMobileDevice){
+  tools.classList.add("mobile");
+  layersDiv.classList.add("mobile");
+}
+
+/* ---------- RESIZE ---------- */
+function resize(){canvas.width=canvas.parentElement.clientWidth;canvas.height=canvas.parentElement.clientHeight;draw();}
+window.onresize=resize; resize();
+
+/* ---------- IMAGE ---------- */
+fileInput.onchange=e=>{const r=new FileReader(); r.onload=ev=>img.src=ev.target.result; r.readAsDataURL(e.target.files[0]);};
+img.onload=()=>{scale=Math.min(canvas.width/img.width,canvas.height/img.height); offX=(canvas.width-img.width*scale)/2; offY=(canvas.height-img.height*scale)/2; draw();};
+
+/* ---------- ZOOM ---------- */
+zoomIn.onclick=()=>{scale*=1.2;draw();}
+zoomOut.onclick=()=>{scale/=1.2;draw();}
+
+/* ---------- DRAW ---------- */
+function draw(){
+  ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.setTransform(scale,0,0,scale,offX,offY);
+  if(img.src) ctx.drawImage(img,0,0);
+  ctx.globalAlpha=opacity;
+  segments.forEach(s=>{
+    ctx.strokeStyle=s.color;
+    ctx.lineWidth=(s===selected?4:2)/scale;
+    ctx.beginPath(); ctx.moveTo(s.a.x,s.a.y); ctx.lineTo(s.b.x,s.b.y); ctx.stroke();
+  });
+  ctx.globalAlpha=1;
+  if(drawing){ctx.setLineDash([8/scale,5/scale]); ctx.strokeStyle="rgba(255,255,255,0.9)"; ctx.lineWidth=2/scale; ctx.beginPath(); ctx.moveTo(drawing.a.x,drawing.a.y); ctx.lineTo(drawing.b.x,drawing.b.y); ctx.stroke(); ctx.setLineDash([]);}
+}
+
+/* ---------- POINTER / TOUCH ---------- */
+let isPanning=false, panStart={x:0,y:0}, spacePressed=false;
+
+function getPointerPos(e){
+  const r = canvas.getBoundingClientRect();
+  let x=0,y=0;
+  if(e.touches && e.touches.length>0){ x=(e.touches[0].clientX-r.left-offX)/scale; y=(e.touches[0].clientY-r.top-offY)/scale;}
+  else { x=(e.clientX-r.left-offX)/scale; y=(e.clientY-r.top-offY)/scale;}
+  return {x,y};
+}
+
+function startInteraction(e){
+  if(isMobileDevice || spacePressed){
+    isPanning=true;
+    panStart={x:(e.touches?e.touches[0].clientX:e.clientX),y:(e.touches?e.touches[0].clientY:e.clientY)};
+    e.preventDefault();
+    return;
+  }
+  const p = getPointerPos(e);
+  if(!drawing){drawing={a:selected?selected.b:p,b:p};}else{
+    const len=Math.hypot(p.x-drawing.a.x,p.y-drawing.a.y);
+    const seg={a:{...drawing.a},b:{...p},baseLength:len,realLength:len,color:colors[segments.length%2]};
+    segments.push(seg); selected=seg;
+    if(learnMode.checked && !baseSegment) baseSegment=seg;
+    drawing=null; updateLayers(); draw();
+  }
+}
+
+function moveInteraction(e){
+  const p = getPointerPos(e);
+  if(isPanning){
+    const clientX=(e.touches?e.touches[0].clientX:e.clientX);
+    const clientY=(e.touches?e.touches[0].clientY:e.clientY);
+    const dx = clientX - panStart.x;
+    const dy = clientY - panStart.y;
+    offX+=dx; offY+=dy; panStart={x:clientX,y:clientY};
+    draw(); return;
+  }
+  if(drawing){drawing.b=p; draw();}
+  if(!learnMode.checked) {tooltip.style.display="none"; return;}
+  let found=false;
+  for(let s of segments){
+    const d=distanceToSegment(p,s);
+    if(d<5/scale){
+      tooltip.style.display="block"; tooltip.style.left=(e.touches?e.touches[0].clientX:e.clientX)+10+"px";
+      tooltip.style.top=(e.touches?e.touches[0].clientY:e.clientY)+10+"px";
+      if(baseSegment){
+        const ratio=s.realLength/baseSegment.baseLength;
+        tooltip.textContent = ratio.toFixed(2)==="1.00"?"Pełna linia bazowa":ratio.toFixed(2)==="0.50"?"Połowa linii bazowej":"Linia "+ratio.toFixed(2)+"× bazowej";
+      } else tooltip.textContent="Brak linii bazowej";
+      found=true; break;
+    }
+  }
+  if(!found) tooltip.style.display="none";
+}
+
+function endInteraction(e){isPanning=false;}
+
+canvas.addEventListener("mousedown",startInteraction);
+canvas.addEventListener("mousemove",moveInteraction);
+canvas.addEventListener("mouseup",endInteraction);
+canvas.addEventListener("mouseleave",endInteraction);
+
+canvas.addEventListener("touchstart",startInteraction,{passive:false});
+canvas.addEventListener("touchmove",moveInteraction,{passive:false});
+canvas.addEventListener("touchend",endInteraction);
+
+/* ---------- SPACE ---------- */
+window.addEventListener('keydown',e=>{if(e.code==='Space'){spacePressed=true; e.preventDefault();}});
+window.addEventListener('keyup',e=>{if(e.code==='Space'){spacePressed=false;}});
+
+/* ---------- COPY ---------- */
+document.querySelectorAll("[data-dir]").forEach(btn=>{
+  btn.onclick=()=>{
+    if(!selected)return;
+    const factor=+lengthMode.value;
+    const len=selected.baseLength*factor;
+    let a={...selected.b},b={...a};
+    if(btn.dataset.dir==="right")b.x+=len;
+    if(btn.dataset.dir==="left")b.x-=len;
+    if(btn.dataset.dir==="down")b.y+=len;
+    if(btn.dataset.dir==="up")b.y-=len;
+    const seg={a,b,baseLength:selected.baseLength,realLength:selected.baseLength*factor,color:colors[segments.length%2]};
+    segments.push(seg); selected=seg; updateLayers(); draw();
+    if(learnMode.checked && baseSegment && factor===1) showRatio(seg);
+  };
+});
+
+/* ---------- EDUCATION OVERLAY ---------- */
+function showRatio(seg){if(!learnMode.checked) return;
+  const ratio=(seg.realLength/baseSegment.baseLength).toFixed(2);
+  const badge=document.createElement("div"); badge.className="tooltip"; badge.textContent=`${ratio}× linii bazowej`;
+  const mid={x:(seg.a.x+seg.b.x)/2*scale+offX, y:(seg.a.y+seg.b.y)/2*scale+offY};
+  badge.style.left=mid.x+"px"; badge.style.top=mid.y+"px";
+  canvas.parentElement.appendChild(badge); setTimeout(()=>badge.remove(),2000);
+}
+
+/* ---------- LAYERS ---------- */
+function updateLayers(){
+  layerList.innerHTML="";
+  segments.forEach((s,i)=>{
+    const li=document.createElement("li");
+    li.innerHTML=`${s===baseSegment?"📏":""} Odcinek ${i+1} <span style="font-size:11px;">[${s.realLength===baseSegment?.baseLength?"pełna":"połowa"}]</span>`;
+    li.className=s===selected?"selected":"";
+    li.onclick=()=>{selected=s;updateLayers();draw();};
+    const colorBtn=document.createElement("div"); colorBtn.className="color-btn"; colorBtn.style.background=s.color;
+    colorBtn.onclick=ev=>{ev.stopPropagation(); s.color=(s.color==="red"?"yellow":"red"); draw(); updateLayers();};
+    li.appendChild(colorBtn);
+    const delBtn=document.createElement("span"); delBtn.className="delete-btn"; delBtn.textContent="🗑";
+    delBtn.onclick=ev=>{ev.stopPropagation(); segments.splice(segments.indexOf(s),1); if(selected===s) selected=null; updateLayers(); draw();};
+    li.appendChild(delBtn);
+    layerList.appendChild(li);
+  });
+}
+
+/* ---------- INPUTS ---------- */
+opacity.oninput=e=>{opacity=e.target.value;draw();}
+learnMode.onchange=()=>{
+  if(learnMode.checked && !baseSegment && segments.length>0) baseSegment=segments[0];
+  updateLayers();
+};
+
+/* ---------- HELPERS ---------- */
+function distanceToSegment(p,s){
+  const x0=p.x, y0=p.y, x1=s.a.x, y1=s.a.y, x2=s.b.x, y2=s.b.y;
+  const dx=x2-x1, dy=y2-y1;
+  const t=Math.max(0,Math.min(1,((x0-x1)*dx+(y0-y1)*dy)/(dx*dx+dy*dy||1)));
+  const x=x1+t*dx, y=y1+t*dy;
+  return Math.hypot(x-x0,y-y0);
+}
+</script>
+</body>
+</html>
