@@ -15,6 +15,7 @@ li.selected{background:#5a5aff;}
 .color-btn{width:30px;height:30px;border-radius:50%;margin-left:6px;cursor:pointer;border:1px solid #ccc;}
 .delete-btn{cursor:pointer;margin-left:6px;color:#ff5555;font-size:18px;}
 .hidden{display:none !important;}
+.groupHeader{display:flex;justify-content:space-between;cursor:pointer;padding:6px;background:#444;margin-top:4px;border-radius:4px;}
 #toggleTools,#toggleView{display:none;position:absolute;top:10px;z-index:20;padding:10px;background:#777;border:none;border-radius:6px;color:#fff;font-size:20px;}
 
 /* Mobile responsive */
@@ -42,7 +43,6 @@ li.selected{background:#5a5aff;}
 </head>
 <body>
 
-<!-- Przyciski mobilne -->
 <button id="toggleTools">☰ Narzędzia</button>
 <button id="toggleView">👁️</button>
 
@@ -66,10 +66,28 @@ li.selected{background:#5a5aff;}
 <button data-dir="up">⬆️ Góra</button>
 <button data-dir="down">⬇️ Dół</button>
 
-<!-- Panel warstw pod narzędziami -->
+<h4>Dodaj do grupy</h4>
+<select id="selectGroup">
+  <option value="Poziome">Poziome</option>
+  <option value="Pionowe">Pionowe</option>
+  <option value="Dodatkowe">Dodatkowe</option>
+</select>
+<button id="addToGroup">Dodaj</button>
+
 <div id="layers">
 <h3>Warstwy</h3>
-<ul id="layerList"></ul>
+<div class="group" id="groupPoziome">
+  <div class="groupHeader" onclick="toggleGroup('Poziome')">📏 Poziome ▼</div>
+  <ul id="listPoziome"></ul>
+</div>
+<div class="group" id="groupPionowe">
+  <div class="groupHeader" onclick="toggleGroup('Pionowe')">📏 Pionowe ▼</div>
+  <ul id="listPionowe"></ul>
+</div>
+<div class="group" id="groupDodatkowe">
+  <div class="groupHeader" onclick="toggleGroup('Dodatkowe')">📁 Dodatkowe ▼</div>
+  <ul id="listDodatkowe"></ul>
+</div>
 </div>
 </div>
 
@@ -93,30 +111,28 @@ let segments=[],selected=null,drawing=null,baseSegment=null;
 const colors=["red","yellow"];
 let firstPoint=null;
 
+let draggingSegment=false;
+let dragStart={x:0,y:0};
+
+let groups={Poziome:[],Pionowe:[],Dodatkowe:[]};
+
 /* ---------- DEVICE DETECTION ---------- */
 const isMobileDevice = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 if(isMobileDevice){
   tools.classList.add("mobile");
   toggleTools.onclick=()=>tools.classList.toggle("active");
-  toggleView.onclick=()=>{
-    tools.classList.toggle("hidden");
-    draw();
-  }
+  toggleView.onclick=()=>{tools.classList.toggle("hidden"); draw();}
 }
 
 /* ---------- RESIZE ---------- */
 function resize(){canvas.width=canvas.parentElement.clientWidth;canvas.height=canvas.parentElement.clientHeight; adjustPanels(); draw();}
 window.onresize=resize; resize();
 
-/* ---------- ADJUST PANELS ---------- */
 function adjustPanels(){
   const vh = window.innerHeight;
   const vw = window.innerWidth;
-  if(vw<=768){
-    tools.style.maxHeight = (vh*0.9)+"px"; // panel narzędzi + warstwy
-  } else {
-    tools.style.maxHeight = "100%";
-  }
+  if(vw<=768){ tools.style.maxHeight = (vh*0.9)+"px"; } 
+  else{ tools.style.maxHeight = "100%"; }
 }
 
 /* ---------- IMAGE ---------- */
@@ -162,7 +178,7 @@ function draw(){
 }
 
 /* ---------- POINTER / TOUCH ---------- */
-let isPanning=false, panStart={x:0,y:0}, spacePressed=false, lastDist=null;
+let isPanning=false, panStartCanvas={x:0,y:0}, spacePressed=false, lastDist=null;
 
 function getPointerPos(e){
   const r = canvas.getBoundingClientRect();
@@ -174,32 +190,60 @@ function getPointerPos(e){
 
 function startInteraction(e){
   e.preventDefault();
-  if(isMobileDevice && e.touches && e.touches.length===2){ lastDist = Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY); return;}
   const p = getPointerPos(e);
-  if(isMobileDevice){
-    if(!firstPoint){ firstPoint=p; drawing={a:{...p},b:{...p}}; draw(); return;}
-    else { const a=firstPoint, b=p; addSegment(a,b); firstPoint=null; drawing=null; return;}
+
+  // Dragging segment
+  if(selected && isNearSegment(p,selected)){ draggingSegment=true; dragStart=p; return; }
+
+  if(isMobileDevice && e.touches && e.touches.length===2){ lastDist = Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY); return;}
+  
+  if(!firstPoint){ 
+    firstPoint=p; 
+    drawing={a:{...p},b:{...p}}; 
+    draw(); 
+    return;
+  } else { 
+    addSegment(firstPoint,p); 
+    firstPoint=null; 
+    drawing=null; 
+    return;
   }
-  if(!drawing){ drawing={a:{...p},b:{...p}}; }
-  if(!isMobileDevice && spacePressed){ isPanning=true; panStart={x:e.clientX,y:e.clientY}; }
+
+  if(!drawing && !draggingSegment){ drawing={a:{...p},b:{...p}}; }
+  if(!isMobileDevice && spacePressed){ isPanning=true; panStartCanvas={x:e.clientX,y:e.clientY}; }
 }
 
 function moveInteraction(e){
   e.preventDefault();
+  const p = getPointerPos(e);
+
+  // Drag segment
+  if(draggingSegment && selected){
+    const dx=p.x-dragStart.x;
+    const dy=p.y-dragStart.y;
+    selected.a.x += dx;
+    selected.a.y += dy;
+    selected.b.x += dx;
+    selected.b.y += dy;
+    dragStart=p;
+    draw(); updateGroups(); return;
+  }
+
+  if(isPanning){
+    const clientX=(e.touches?e.touches[0].clientX:e.clientX);
+    const clientY=(e.touches?e.touches[0].clientY:e.clientY);
+    const dx = clientX - panStartCanvas.x;
+    const dy = clientY - panStartCanvas.y;
+    offX+=dx; offY+=dy; panStartCanvas={x:clientX,y:clientY};
+    draw(); return;
+  }
+
   if(isMobileDevice && e.touches && e.touches.length===2){
     const dist = Math.hypot(e.touches[0].clientX-e.touches[1].clientX,e.touches[0].clientY-e.touches[1].clientY);
     if(lastDist){ scale*=dist/lastDist; draw();}
     lastDist = dist; return;
   }
-  const p = getPointerPos(e);
-  if(isPanning){
-    const clientX=(e.touches?e.touches[0].clientX:e.clientX);
-    const clientY=(e.touches?e.touches[0].clientY:e.clientY);
-    const dx = clientX - panStart.x;
-    const dy = clientY - panStart.y;
-    offX+=dx; offY+=dy; panStart={x:clientX,y:clientY};
-    draw(); return;
-  }
+
   if(drawing){ 
     const dx = p.x-drawing.a.x;
     const dy = p.y-drawing.a.y;
@@ -211,29 +255,24 @@ function moveInteraction(e){
 }
 
 function endInteraction(e){
+  draggingSegment=false;
+  isPanning=false; lastDist=null;
   if(drawing && (!e.touches || e.touches.length===0)){
     addSegment(drawing.a,drawing.b);
     drawing=null; firstPoint=null;
   }
-  isPanning=false; lastDist=null;
 }
 
+/* ---------- ADD SEGMENT ---------- */
 function addSegment(a,b){
   const len = Math.hypot(b.x-a.x,b.y-a.y);
-  const seg = {a:{...a}, b:{...b}, baseLength:len, realLength:len, color:colors[segments.length%2]};
+  let group = Math.abs(a.x-b.x)>Math.abs(a.y-b.y)?"Poziome":"Pionowe";
+  const seg = {a:{...a}, b:{...b}, baseLength:len, realLength:len, color:colors[segments.length%2], group:group};
   segments.push(seg); selected=seg;
   if(learnMode.checked && !baseSegment) baseSegment=seg;
-  updateLayers(); draw();
+  updateGroups(); draw();
   if(learnMode.checked) showRatio(seg);
 }
-
-canvas.addEventListener("mousedown",startInteraction);
-canvas.addEventListener("mousemove",moveInteraction);
-canvas.addEventListener("mouseup",endInteraction);
-canvas.addEventListener("mouseleave",endInteraction);
-canvas.addEventListener("touchstart",startInteraction,{passive:false});
-canvas.addEventListener("touchmove",moveInteraction,{passive:false});
-canvas.addEventListener("touchend",endInteraction);
 
 /* ---------- SPACE ---------- */
 window.addEventListener('keydown',e=>{if(e.code==='Space'){spacePressed=true; e.preventDefault();}});
@@ -250,8 +289,8 @@ document.querySelectorAll("[data-dir]").forEach(btn=>{
     if(btn.dataset.dir==="left")b.x-=len;
     if(btn.dataset.dir==="down")b.y+=len;
     if(btn.dataset.dir==="up")b.y-=len;
-    const seg={a,b,baseLength:selected.baseLength,realLength:selected.baseLength*factor,color:colors[segments.length%2]};
-    segments.push(seg); selected=seg; updateLayers(); draw();
+    const seg={a,b,baseLength:selected.baseLength,realLength:selected.baseLength*factor,color:colors[segments.length%2],group:selected.group};
+    segments.push(seg); selected=seg; updateGroups(); draw();
     if(learnMode.checked && baseSegment && factor===1) showRatio(seg);
   };
 });
@@ -286,29 +325,48 @@ function showTooltip(p){
 }
 
 /* ---------- LAYERS ---------- */
-function updateLayers(){
-  const layerList=document.getElementById("layerList");
-  layerList.innerHTML="";
-  segments.forEach((s,i)=>{
-    const li=document.createElement("li");
-    li.innerHTML=`${s===baseSegment?"📏":""} Odcinek ${i+1} <span style="font-size:12px;">[${s.realLength===baseSegment?.baseLength?"pełna":"połowa"}]</span>`;
-    li.className=s===selected?"selected":"";
-    li.onclick=()=>{selected=s;updateLayers();draw();};
-    const colorBtn=document.createElement("div"); colorBtn.className="color-btn"; colorBtn.style.background=s.color;
-    colorBtn.onclick=ev=>{ev.stopPropagation(); s.color=(s.color==="red"?"yellow":"red"); draw(); updateLayers();};
-    li.appendChild(colorBtn);
-    const delBtn=document.createElement("span"); delBtn.className="delete-btn"; delBtn.textContent="🗑";
-    delBtn.onclick=ev=>{ev.stopPropagation(); segments.splice(segments.indexOf(s),1); if(selected===s) selected=null; updateLayers(); draw();};
-    li.appendChild(delBtn);
-    layerList.appendChild(li);
-  });
+function updateGroups(){
+  groups={Poziome:[],Pionowe:[],Dodatkowe:[]};
+  segments.forEach(seg=>{groups[seg.group].push(seg);});
+
+  for(let g in groups){
+    const ul=document.getElementById("list"+g);
+    ul.innerHTML="";
+    groups[g].forEach((s,i)=>{
+      const li=document.createElement("li");
+      li.textContent="Odcinek "+(segments.indexOf(s)+1);
+      li.className=s===selected?"selected":"";
+      li.onclick=()=>{selected=s; draw(); updateGroups();};
+      const colorBtn=document.createElement("div"); colorBtn.className="color-btn"; colorBtn.style.background=s.color;
+      colorBtn.onclick=ev=>{ev.stopPropagation(); s.color=(s.color==="red"?"yellow":"red"); draw(); updateGroups();};
+      li.appendChild(colorBtn);
+      const delBtn=document.createElement("span"); delBtn.className="delete-btn"; delBtn.textContent="🗑";
+      delBtn.onclick=ev=>{ev.stopPropagation(); segments.splice(segments.indexOf(s),1); if(selected===s) selected=null; updateGroups(); draw();};
+      li.appendChild(delBtn);
+      ul.appendChild(li);
+    });
+  }
+}
+
+function toggleGroup(groupName){
+  const ul=document.getElementById("list"+groupName);
+  ul.style.display = ul.style.display==="none"?"block":"none";
+}
+
+/* ---------- ADD TO GROUP BUTTON ---------- */
+addToGroup.onclick=()=>{
+  if(selected){
+    selected.group = selectGroup.value;
+    updateGroups();
+    draw();
+  }
 }
 
 /* ---------- INPUTS ---------- */
 opacity.oninput=e=>{opacity=e.target.value;draw();}
 learnMode.onchange=()=>{
   if(learnMode.checked && !baseSegment && segments.length>0) baseSegment=segments[0];
-  updateLayers();
+  updateGroups();
 };
 
 /* ---------- HELPERS ---------- */
@@ -319,6 +377,19 @@ function distanceToSegment(p,s){
   const x=x1+t*dx, y=y1+t*dy;
   return Math.hypot(x-x0,y-y0);
 }
+
+function isNearSegment(p,s){
+  return distanceToSegment(p,s)<5/scale;
+}
+
+/* ---------- EVENTS ---------- */
+canvas.addEventListener("mousedown",startInteraction);
+canvas.addEventListener("mousemove",moveInteraction);
+canvas.addEventListener("mouseup",endInteraction);
+canvas.addEventListener("mouseleave",endInteraction);
+canvas.addEventListener("touchstart",startInteraction,{passive:false});
+canvas.addEventListener("touchmove",moveInteraction,{passive:false});
+canvas.addEventListener("touchend",endInteraction);
 </script>
 </body>
 </html>
