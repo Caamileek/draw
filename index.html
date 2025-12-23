@@ -5,40 +5,37 @@
 <title>Proporcje – Mobile & Desktop</title>
 <style>
 body{margin:0;height:100vh;display:flex;background:#2b2b2b;color:#eee;font-family:Arial;}
-#tools,#layers{width:230px;background:#3a3a3a;padding:10px;overflow:auto;}
+#tools{width:250px;background:#3a3a3a;padding:10px;overflow:auto;}
 #canvasWrap{flex:1;position:relative;background:#1e1e1e;overflow:hidden;}
 canvas{width:100%;height:100%;cursor:crosshair;}
-button,select,input,label{width:100%;margin-bottom:6px;padding:6px;background:#555;color:#eee;border:none;font-size:14px;border-radius:4px;}
-li{padding:6px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;font-size:14px;}
+button,select,input,label{width:100%;margin-bottom:6px;padding:10px;background:#555;color:#eee;border:none;font-size:16px;border-radius:6px;}
+li{padding:8px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;font-size:16px;}
 li.selected{background:#5a5aff;}
-.tooltip{position:absolute;background:rgba(0,0,0,0.7);color:#fff;padding:4px 6px;font-size:12px;border-radius:4px;pointer-events:none;white-space:nowrap;}
-.color-btn{width:25px;height:25px;border-radius:50%;margin-left:4px;cursor:pointer;border:1px solid #ccc;}
-.delete-btn{cursor:pointer;margin-left:6px;color:#ff5555;font-size:16px;}
+.tooltip{position:absolute;background:rgba(0,0,0,0.7);color:#fff;padding:4px 6px;font-size:14px;border-radius:4px;pointer-events:none;white-space:nowrap;}
+.color-btn{width:30px;height:30px;border-radius:50%;margin-left:6px;cursor:pointer;border:1px solid #ccc;}
+.delete-btn{cursor:pointer;margin-left:6px;color:#ff5555;font-size:18px;}
 .hidden{display:none !important;}
-#toggleTools,#toggleLayers,#toggleView{display:none;position:absolute;top:10px;z-index:20;padding:10px;background:#777;border:none;border-radius:6px;color:#fff;font-size:20px;}
+#toggleTools,#toggleView{display:none;position:absolute;top:10px;z-index:20;padding:10px;background:#777;border:none;border-radius:6px;color:#fff;font-size:20px;}
 
 /* Mobile responsive */
 @media(max-width:768px){
   body{flex-direction:column;}
-  #tools,#layers {
+  #tools{
     width:100%;
     position:absolute;
     top:0;
     left:0;
-    max-height:50vh;
+    max-height:90vh;
     display:none;
     z-index:10;
     overflow-y:auto;
   }
-  #tools.mobile.active,#layers.mobile.active{
-    display:block;
-  }
-  canvas{cursor:default;}
-  button,select,input,label{font-size:18px;padding:10px;}
-  li{font-size:16px;}
-  #toggleTools,#toggleLayers,#toggleView{display:block;top:auto;bottom:10px;}
+  #tools.mobile.active{display:block;}
+  #canvasWrap{margin-top:0;}
+  button,select,input,label{font-size:18px;padding:12px;}
+  li{font-size:18px;}
+  #toggleTools,#toggleView{display:block;top:auto;bottom:10px;}
   #toggleTools{left:10px;}
-  #toggleLayers{left:80px;}
   #toggleView{right:10px;}
 }
 </style>
@@ -47,7 +44,6 @@ li.selected{background:#5a5aff;}
 
 <!-- Przyciski mobilne -->
 <button id="toggleTools">☰ Narzędzia</button>
-<button id="toggleLayers">🗂 Warstwy</button>
 <button id="toggleView">👁️</button>
 
 <div id="tools">
@@ -69,16 +65,17 @@ li.selected{background:#5a5aff;}
 <button data-dir="right">➡️ Prawo</button>
 <button data-dir="up">⬆️ Góra</button>
 <button data-dir="down">⬇️ Dół</button>
+
+<!-- Panel warstw pod narzędziami -->
+<div id="layers">
+<h3>Warstwy</h3>
+<ul id="layerList"></ul>
+</div>
 </div>
 
 <div id="canvasWrap">
 <canvas id="canvas"></canvas>
 <div id="tooltip" class="tooltip" style="display:none;"></div>
-</div>
-
-<div id="layers">
-<h3>Warstwy</h3>
-<ul id="layerList"></ul>
 </div>
 
 <script>
@@ -87,9 +84,7 @@ const ctx=canvas.getContext("2d");
 const tooltip=document.getElementById("tooltip");
 const layerList=document.getElementById("layerList");
 const tools=document.getElementById("tools");
-const layersDiv=document.getElementById("layers");
 const toggleTools=document.getElementById("toggleTools");
-const toggleLayers=document.getElementById("toggleLayers");
 const toggleView=document.getElementById("toggleView");
 
 let img=new Image();
@@ -102,12 +97,9 @@ let firstPoint=null;
 const isMobileDevice = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 if(isMobileDevice){
   tools.classList.add("mobile");
-  layersDiv.classList.add("mobile");
   toggleTools.onclick=()=>tools.classList.toggle("active");
-  toggleLayers.onclick=()=>layersDiv.classList.toggle("active");
   toggleView.onclick=()=>{
     tools.classList.toggle("hidden");
-    layersDiv.classList.toggle("hidden");
     draw();
   }
 }
@@ -121,11 +113,9 @@ function adjustPanels(){
   const vh = window.innerHeight;
   const vw = window.innerWidth;
   if(vw<=768){
-    tools.style.maxHeight = (vh*0.45)+"px";
-    layersDiv.style.maxHeight = (vh*0.45)+"px";
+    tools.style.maxHeight = (vh*0.9)+"px"; // panel narzędzi + warstwy
   } else {
     tools.style.maxHeight = "100%";
-    layersDiv.style.maxHeight = "100%";
   }
 }
 
@@ -297,10 +287,11 @@ function showTooltip(p){
 
 /* ---------- LAYERS ---------- */
 function updateLayers(){
+  const layerList=document.getElementById("layerList");
   layerList.innerHTML="";
   segments.forEach((s,i)=>{
     const li=document.createElement("li");
-    li.innerHTML=`${s===baseSegment?"📏":""} Odcinek ${i+1} <span style="font-size:11px;">[${s.realLength===baseSegment?.baseLength?"pełna":"połowa"}]</span>`;
+    li.innerHTML=`${s===baseSegment?"📏":""} Odcinek ${i+1} <span style="font-size:12px;">[${s.realLength===baseSegment?.baseLength?"pełna":"połowa"}]</span>`;
     li.className=s===selected?"selected":"";
     li.onclick=()=>{selected=s;updateLayers();draw();};
     const colorBtn=document.createElement("div"); colorBtn.className="color-btn"; colorBtn.style.background=s.color;
